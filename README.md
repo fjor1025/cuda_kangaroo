@@ -155,3 +155,64 @@ All point arithmetic test groups PASSED.
 Same instructions as Phase 4a apply if anything fails: send back the
 full output (especially the "first failure at index N") and I'll
 reproduce it in the Python reference to debug.
+
+## Phase 4c: The Kangaroo Walk Itself
+
+Built on the now hardware-verified field (4a) and point (4b) arithmetic.
+This is the actual jump table, distinguished-point detection, and
+tame/wild stepping logic -- genuinely new, unverified-on-hardware code.
+
+**Scope**: deliberately a single-thread walk (one thread runs the full
+tame+wild loop sequentially), matching `kangaroo_cpu.py`'s `solve()`
+structure exactly. This proves the stepping/DP-matching logic in
+isolation before the separate, larger problem of running many kangaroos
+in parallel with a shared, contended DP store across threads (future
+work, not this phase).
+
+**New files:**
+- `kangaroo_walk.cuh` — the walk kernel: jump table construction (from
+  Python-precomputed exponents, avoiding re-deriving that math in C++),
+  distinguished-point key (matches `kangaroo_cpu.dp_key` exactly, full
+  x-coordinate not truncated), an open-addressing DP hash table (verified
+  first in `kangaroo_walk_sim.py` against the dict-based CPU baseline),
+  and the walk loop itself.
+- `kangaroo_walk_sim.py` — Python simulation of the exact algorithm
+  (including the open-addressing table mechanics), verified against
+  `kangaroo_cpu.py`'s dict-based baseline before any CUDA was written.
+  All 4 test cases matched the baseline's jump counts *exactly*.
+- `generate_walk_test_vectors.py` — generates `walk_test_vectors.h`:
+  jump-table exponents, puzzle params, and expected recovered keys, all
+  computed via the trusted Python reference.
+- `walk_test_vectors.h` — the generated test cases (included, already run).
+- `test_kangaroo_walk.cu` — the test harness.
+
+**A bug worth knowing about**: an early version used `add_mod`/`sub_mod`
+(reduction mod **P**, the field prime) to track kangaroo distances.
+Distances are scalars and must be reduced mod **N** (the curve order,
+a different value from P) — using the wrong modulus happened to not
+produce a wrong answer at this toy test scale (distances never got
+anywhere near either modulus), but was conceptually incorrect and would
+have broken at real puzzle scale. Fixed: distances now accumulate as
+plain (non-modular) values during the walk, exactly like the unbounded
+Python integers in `kangaroo_cpu.py`, with proper mod-N reduction only
+at the final key computation.
+
+**Build and run:**
+```bash
+python3 generate_walk_test_vectors.py   # regenerate walk_test_vectors.h
+nvcc -O3 -arch=sm_86 -o test_kangaroo_walk test_kangaroo_walk.cu
+./test_kangaroo_walk
+```
+
+**Expected output on success:**
+```
+Kangaroo walk self-test (Phase 4c)
+----------------------------------------------------------------------
+[PASS] test 0: found=1 key_matches=1
+[PASS] test 1: found=1 key_matches=1
+[PASS] test 2: found=1 key_matches=1
+[PASS] test 3: found=1 key_matches=1
+----------------------------------------------------------------------
+All 4 kangaroo walk test cases PASSED -- recovered the exact
+correct private key in every case, matching the Python reference.
+```

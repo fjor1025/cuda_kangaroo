@@ -8,6 +8,7 @@
 #
 test_vectors.h
 point_test_vectors.h
+walk_test_vectors.h
 
 # Compiled binaries
 test_field_arithmetic
