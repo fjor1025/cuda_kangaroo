@@ -10,7 +10,6 @@ Affine coordinates only. No side-channel/constant-time hardening — this is
 a research/benchmarking reference, not a wallet signing path.
 """
 
-from dataclasses import dataclass
 from typing import Optional
 
 # --- Curve parameters (secp256k1) ---
@@ -22,15 +21,38 @@ GX = 0x79BE667E_F9DCBBAC_55A06295_CE870B07_029BFCDB_2DCE28D9_59F2815B_16F81798
 GY = 0x483ADA77_26A3C465_5DA4FBFC_0E1108A8_FD17B448_A6855419_9C47D08F_FB10D4B8
 
 
-@dataclass(frozen=True)
-class Point:
-    """Affine point. None coordinates represent the point at infinity (identity)."""
-    x: Optional[int]
-    y: Optional[int]
+class Point(object):
+    """Affine point. None coordinates represent the point at infinity (identity).
+
+    Plain class rather than @dataclass -- the `dataclasses` module isn't
+    in the standard library until Python 3.7, and the target rig runs
+    3.6.9. Equality/hash/repr are implemented by hand below to match
+    what @dataclass(frozen=True) would have auto-generated.
+    """
+    __slots__ = ("x", "y")
+
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
     @property
-    def is_infinity(self) -> bool:
+    def is_infinity(self):
         return self.x is None
+
+    def __eq__(self, other):
+        if not isinstance(other, Point):
+            return NotImplemented
+        return self.x == other.x and self.y == other.y
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        return result if result is NotImplemented else not result
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+    def __repr__(self):
+        return "Point(x={!r}, y={!r})".format(self.x, self.y)
 
 
 INFINITY = Point(None, None)
