@@ -1,0 +1,16 @@
+# Auto-generated test vector headers -- large (900KB+), array-literal-heavy
+# files that can crash editors trying to parse/index/diff them (this is
+# what crashed VSCode). They're deterministic (fixed random seeds), so
+# just regenerate them after cloning rather than committing them:
+#
+#   python3 generate_test_vectors.py
+#   python3 generate_point_test_vectors.py
+#
+test_vectors.h
+point_test_vectors.h
+
+# Compiled binaries
+test_field_arithmetic
+test_point_arithmetic
+*.o
+*.exe
