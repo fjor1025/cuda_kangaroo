@@ -35,7 +35,6 @@ Algorithm (interval discrete log via Pollard's Kangaroo):
     hash collisions in the DP store.
 """
 
-from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 import random
 import time
@@ -44,17 +43,23 @@ import math
 from secp256k1 import Point, INFINITY, G, N, point_add, scalar_mult
 
 
-@dataclass
-class JumpTable:
+class JumpTable(object):
     """Precomputed jump points and their scalar sizes.
+
+    Plain class rather than @dataclass -- the `dataclasses` module isn't
+    in the standard library until Python 3.7, and the target rig runs
+    3.6.9 (same fix already applied to secp256k1.py's Point class).
 
     Jump sizes are powers of two centered so the *mean* jump is close to
     sqrt(range_size), which is what gives Kangaroo its O(sqrt(range))
     expected running time. `table_size` of 16-32 is standard.
     """
-    exponents: list
-    points: list  # points[i] = 2^exponents[i] * G
-    mean_jump: float
+    __slots__ = ("exponents", "points", "mean_jump")
+
+    def __init__(self, exponents, points, mean_jump):
+        self.exponents = exponents
+        self.points = points  # points[i] = 2^exponents[i] * G
+        self.mean_jump = mean_jump
 
     @staticmethod
     def build(range_size: int, table_size: int = 32, spread: int = 4,
@@ -130,13 +135,20 @@ def dp_key(p: Point, dp_bits: int) -> Optional[int]:
     return None
 
 
-@dataclass
-class KangarooResult:
-    found: bool
-    private_key: Optional[int]
-    total_jumps: int
-    elapsed_s: float
-    measured_k: float  # total_jumps / sqrt(range_size)
+class KangarooResult(object):
+    __slots__ = ("found", "private_key", "total_jumps", "elapsed_s", "measured_k")
+
+    def __init__(self, found, private_key, total_jumps, elapsed_s, measured_k):
+        self.found = found
+        self.private_key = private_key
+        self.total_jumps = total_jumps
+        self.elapsed_s = elapsed_s
+        self.measured_k = measured_k  # total_jumps / sqrt(range_size)
+
+    def __repr__(self):
+        return ("KangarooResult(found={!r}, private_key={!r}, total_jumps={!r}, "
+                "elapsed_s={!r}, measured_k={!r})").format(
+            self.found, self.private_key, self.total_jumps, self.elapsed_s, self.measured_k)
 
 
 def solve(pubkey: Point, a: int, b: int, dp_bits: int,
