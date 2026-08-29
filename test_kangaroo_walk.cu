@@ -69,6 +69,19 @@ int main() {
     cudaMalloc(&d_found, sizeof(int));
     cudaMalloc(&d_key_limbs, 4 * sizeof(uint64_t));
 
+    // WALK_TESTS is a __device__ (GPU-only) array -- it cannot be read
+    // directly from host code (the compiler warns about exactly this:
+    // "a __device__ variable cannot be directly read in a host
+    // function"). An earlier version did `WALK_TESTS[t]` directly in
+    // main(), which silently read garbage/undefined memory rather than
+    // erroring, making every test's expected-key comparison meaningless
+    // -- the kernel was very likely finding the CORRECT key the whole
+    // time (it verifies scalar_mult(k)==pubkey internally before ever
+    // returning found=true), but main() was comparing against garbage.
+    // Fix: explicitly copy the array to host memory first.
+    WalkTestCase h_walk_tests[N_WALK_TESTS];
+    cudaMemcpyFromSymbol(h_walk_tests, WALK_TESTS, N_WALK_TESTS * sizeof(WalkTestCase));
+
     int failures = 0;
 
     for (int t = 0; t < N_WALK_TESTS; t++) {
@@ -82,7 +95,7 @@ int main() {
         cudaMemcpy(&h_found, d_found, sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(h_key_limbs, d_key_limbs, 4 * sizeof(uint64_t), cudaMemcpyDeviceToHost);
 
-        WalkTestCase tc = WALK_TESTS[t];
+        WalkTestCase tc = h_walk_tests[t];
         bool key_matches = h_found &&
             h_key_limbs[0] == tc.expected_key[0] && h_key_limbs[1] == tc.expected_key[1] &&
             h_key_limbs[2] == tc.expected_key[2] && h_key_limbs[3] == tc.expected_key[3];
