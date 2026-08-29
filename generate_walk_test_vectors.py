@@ -23,10 +23,27 @@ from kangaroo_cpu import JumpTable
 from kangaroo_walk_sim import solve_sim
 
 TEST_CASES = [
+    # Original small-scale regression set (unchanged, keeps confidence
+    # that scaling up hasn't broken anything at the sizes already
+    # hardware-verified).
     (16, 4, 100),
     (18, 4, 100),
     (20, 5, 100),
     (22, 5, 100),
+    # Scale-up set: larger bit-widths to get real single-thread GPU
+    # throughput data. Capped at 2^32 -- 2^34 took over 90s just to
+    # verify in pure Python (the reference-generation step, not the GPU
+    # run), which was the practical ceiling for generating vectors in a
+    # reasonable time. This is still astronomically far from puzzle-scale
+    # ranges (#90 needs ~35 TRILLION steps vs ~65,536 expected here) --
+    # see the conversation for the full scale comparison. The point of
+    # this tier is real hardware timing data and correctness confidence
+    # at larger sizes, not approaching puzzle scale by single-thread
+    # scaling alone.
+    (26, 6, 200),
+    (28, 7, 200),
+    (30, 8, 200),
+    (32, 9, 200),
 ]
 
 
@@ -91,7 +108,7 @@ if __name__ == "__main__":
             f.write(f"        {{{', '.join(u256_hex_limbs(c['pubkey_y']))}}},\n")
             f.write(f"        {{{', '.join(str(e) for e in c['exponents'])}}},\n")
             f.write(f"        {{{', '.join(u256_hex_limbs(c['expected_key']))}}},\n")
-            f.write(f"        {max(2_000_000, c['expected_jumps'] * 10)}ULL\n")
+            f.write(f"        {max(2_000_000, c['expected_jumps'] * 20)}ULL\n")
             f.write("    },\n")
         f.write("};\n")
 

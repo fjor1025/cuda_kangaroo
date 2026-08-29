@@ -156,7 +156,7 @@ __device__ __forceinline__ bool point_equal_pub(const ECPoint& a, const ECPoint&
 __device__ bool kangaroo_solve(
         const ECPoint& pubkey, const u256& a, const u256& b, int dp_bits,
         const int* exponents, int table_size, uint64_t max_jumps,
-        DPEntry* dp_table, u256* out_key) {
+        DPEntry* dp_table, u256* out_key, uint64_t* out_jumps) {
 
     // Build the jump table's points from the (host-supplied, already
     // Python-verified) exponents. table_size is small (32), so 32
@@ -220,6 +220,7 @@ __device__ bool kangaroo_solve(
                         ECPoint check = scalar_mult(k, g);
                         if (point_equal_pub(check, pubkey)) {
                             *out_key = k;
+                            *out_jumps = jumps;
                             return true;
                         }
                     }
@@ -248,6 +249,7 @@ __device__ bool kangaroo_solve(
                         ECPoint check = scalar_mult(k, g);
                         if (point_equal_pub(check, pubkey)) {
                             *out_key = k;
+                            *out_jumps = jumps;
                             return true;
                         }
                     }
@@ -255,5 +257,6 @@ __device__ bool kangaroo_solve(
             }
         }
     }
+    *out_jumps = jumps;
     return false;
 }

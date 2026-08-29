@@ -216,3 +216,61 @@ Kangaroo walk self-test (Phase 4c)
 All 4 kangaroo walk test cases PASSED -- recovered the exact
 correct private key in every case, matching the Python reference.
 ```
+
+**Status: CONFIRMED on the rig, with a real bug found and fixed along the
+way.** The first run compiled with a warning (`a __device__ variable
+"WALK_TESTS" cannot be directly read in a host function`) and failed
+every test's key comparison (`found=1 key_matches=0`). Root cause: the
+test harness's `main()` was directly indexing the `__device__` (GPU-only)
+`WALK_TESTS` array from host code -- illegal, and silently read garbage
+instead of the real expected keys. The kernel itself was almost
+certainly finding the correct key the whole time (it verifies
+`scalar_mult(k)==pubkey` internally before ever returning `found=true`).
+Fixed with `cudaMemcpyFromSymbol` to properly copy the test data to host
+memory first. After the fix: clean compile, **zero warnings**, all 4
+tests pass.
+
+## Scaling Up: Real Hardware Timing Data
+
+Extended the test set with larger bit-widths (26, 28, 30, 32 -- capped
+there because generating the Python reference itself became impractically
+slow beyond 2^32, taking several minutes just to verify one case) and
+added timing instrumentation (`cudaEvent` based) to report jumps/sec for
+each test case.
+
+**Important scope note**: this single-thread scaling exercise gets real
+hardware throughput numbers and validates correctness at larger ranges,
+but it does **not** meaningfully approach puzzle #90-135 scale by itself.
+The gap is enormous:
+
+| Range | Expected steps (~sqrt(range)) |
+|---|---|
+| 2^32 (this test's max) | ~65,536 |
+| Puzzle #90 | ~35 trillion |
+| Puzzle #135 | ~1.5×10^20 |
+
+Even at an optimistic 10 million steps/sec on a single thread, puzzle #90
+alone would take over a month. This is the concrete, measured reason
+Phase 4d (parallelizing across thousands of CUDA threads per GPU) and
+multi-GPU scaling are necessary next steps, not optional polish -- the
+real jumps/sec number from this test run is what lets us calculate
+exactly how much parallelism is actually needed.
+
+**Rebuild and rerun** (regenerate the vectors first -- the new larger
+test cases aren't in your current `walk_test_vectors.h`):
+```bash
+python3 generate_walk_test_vectors.py   # now takes a few minutes (bits=32 verification is slow in pure Python)
+nvcc -O3 -arch=sm_86 -o test_kangaroo_walk test_kangaroo_walk.cu
+./test_kangaroo_walk
+```
+
+Expected output now includes timing per test:
+```
+[PASS] test 0: found=1 key_matches=1 jumps=177 time=0.12ms (1475000 jumps/sec)
+...
+[PASS] test 7: found=1 key_matches=1 jumps=1488796 time=XXXms (XXX jumps/sec)
+```
+The jumps/sec figures are the real number to send back -- that's what
+turns "we need Phase 4d" from a general statement into a concrete plan
+(how many parallel threads, roughly how long a real puzzle attempt would
+take at various thread counts, etc.).
