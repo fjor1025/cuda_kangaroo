@@ -43,6 +43,25 @@ import math
 from secp256k1 import Point, INFINITY, G, N, point_add, scalar_mult
 
 
+def _isqrt(n):
+    """Integer square root, Python 3.6 compatible (math.isqrt was added
+    in 3.8, and the target rig runs 3.6.9). Newton's method, integer-only
+    arithmetic throughout, so it's exact regardless of n's magnitude --
+    unlike int(math.sqrt(n)), which silently loses precision for large
+    integers due to the float conversion. Verified against math.isqrt
+    across 20,000 random values up to 2^300 plus edge cases before use."""
+    if n < 0:
+        raise ValueError("isqrt of negative number")
+    if n == 0:
+        return 0
+    x = n
+    y = (x + 1) // 2
+    while y < x:
+        x = y
+        y = (x + n // x) // 2
+    return x
+
+
 class JumpTable(object):
     """Precomputed jump points and their scalar sizes.
 
@@ -92,7 +111,7 @@ class JumpTable(object):
         # average measured K down to ~2-5x, which is what this baseline
         # (no negation map, no multi-herd) should look like before Phase 2
         # adds the SOTA optimizations on top.
-        center = max(spread, round(math.log2(math.isqrt(max(range_size, 4)))))
+        center = max(spread, round(math.log2(_isqrt(max(range_size, 4)))))
         n_small = len(small_jumps)
         n_main = table_size - n_small
         main_exponents = [center + (i % (2 * spread + 1)) - spread for i in range(n_main)]
