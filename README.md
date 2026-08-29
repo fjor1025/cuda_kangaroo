@@ -230,6 +230,46 @@ Fixed with `cudaMemcpyFromSymbol` to properly copy the test data to host
 memory first. After the fix: clean compile, **zero warnings**, all 4
 tests pass.
 
+## A Performance Bug Found After the First Timing Run
+
+The first timing run (after the DP-table-clear fix) showed **identical**
+numbers to before -- 18-115 jumps/sec, a roughly constant ~9.7s overhead
+per test case regardless of actual work. The memset fix was real and
+worth keeping, but it wasn't the dominant cost.
+
+**Root cause**: `scalar_mult` in `secp256k1_point.cuh` unconditionally
+looped through all 256 bits of the scalar, regardless of how small the
+actual value was. The jump table is built from 32 calls to `scalar_mult`
+with small values (jump sizes are typically under ~12 bits) -- so every
+single kernel launch was burning through 32×256=8192 wasted point
+doublings (each requiring a full modular inversion) before the walk even
+started. The math checked out: the implied per-inversion cost from the
+~9.7s fixed overhead (~1.18ms) closely matched the directly-measured
+per-jump cost (~0.99ms, each jump also doing roughly one inversion) --
+strong confirmation this was the actual mechanism, not a guess.
+
+**Fix**: `scalar_mult` now stops after the highest *set* bit rather than
+always processing all 256, which is mathematically identical (verified
+against the Python reference across both small and large scalars before
+touching CUDA) since all bits past that point are zero and can only ever
+contribute discarded doublings, never a different result. Note this
+optimization did NOT apply to `pow_mod`/`inv_mod` (used internally by
+every `point_add`) -- that exponent is always `p-2`, a genuinely
+~256-bit number, so there's no waste to skip there.
+
+**Since this touches `secp256k1_point.cuh` (shared with the already
+hardware-verified Phase 4b)**, please re-run the Phase 4b test first to
+confirm nothing broke, before trusting the new Phase 4c timing numbers:
+```bash
+nvcc -O3 -arch=sm_86 -o test_point_arithmetic test_point_arithmetic.cu
+./test_point_arithmetic   # should still show 156/156 and 85/85
+```
+Then rebuild and rerun the walk test:
+```bash
+nvcc -O3 -arch=sm_86 -o test_kangaroo_walk test_kangaroo_walk.cu
+./test_kangaroo_walk
+```
+
 ## Scaling Up: Real Hardware Timing Data
 
 Extended the test set with larger bit-widths (26, 28, 30, 32 -- capped

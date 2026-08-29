@@ -86,15 +86,43 @@ __device__ __forceinline__ ECPoint point_add(const ECPoint& p1, const ECPoint& p
     return result;
 }
 
+__device__ __forceinline__ int u256_bit_length(const u256& k) {
+    // Position of the highest set bit + 1 (0 if k is entirely zero).
+    // Used by scalar_mult below to skip guaranteed-no-op iterations.
+    for (int limb_i = NUM_LIMBS - 1; limb_i >= 0; limb_i--) {
+        if (k.limb[limb_i] != 0) {
+            return limb_i * 64 + (64 - __clzll(k.limb[limb_i]));
+        }
+    }
+    return 0;
+}
+
 // Double-and-add scalar multiplication, mirroring scalar_mult() in
 // secp256k1.py: processes the scalar from its least-significant bit
 // upward, exactly the same bit order as pow_mod() in the field layer.
+//
+// Stops after the highest SET bit rather than unconditionally looping
+// all 256 bits -- this was found to matter a great deal in practice: the
+// jump table is built from 32 calls to this function with small scalars
+// (jump sizes are typically a few hundred to a few thousand, i.e. under
+// ~12 bits), and the original unconditional 256-bit loop meant every
+// single kernel launch was burning through 32*256=8192 wasted point
+// doublings (each requiring a full modular inversion) before the actual
+// walk even started -- measured on hardware as a roughly CONSTANT ~9.7
+// SECOND overhead per test case, regardless of how much real walking
+// work there was to do. Stopping early is mathematically identical
+// (verified against the Python reference across small and large scalars
+// before making this change): all bits past the highest set bit are
+// zero, so they can only ever contribute doublings that get discarded
+// (no addition ever happens for a zero bit), never a different result.
 __device__ __forceinline__ ECPoint scalar_mult(const u256& k, const ECPoint& point) {
     ECPoint result = make_infinity();
     ECPoint addend = point;
-    for (int limb_i = 0; limb_i < NUM_LIMBS; limb_i++) {
+    int bit_length = u256_bit_length(k);
+    int total_bits = 0;
+    for (int limb_i = 0; limb_i < NUM_LIMBS && total_bits < bit_length; limb_i++) {
         uint64_t e = k.limb[limb_i];
-        for (int bit = 0; bit < 64; bit++) {
+        for (int bit = 0; bit < 64 && total_bits < bit_length; bit++, total_bits++) {
             if (e & 1ULL) {
                 result = point_add(result, addend);
             }
