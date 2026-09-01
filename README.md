@@ -314,3 +314,93 @@ The jumps/sec figures are the real number to send back -- that's what
 turns "we need Phase 4d" from a general statement into a concrete plan
 (how many parallel threads, roughly how long a real puzzle attempt would
 take at various thread counts, etc.).
+
+## Phase 4d: Parallelizing Within One GPU
+
+Built on the single-thread walk (4c) and all arithmetic layers below it,
+all already hardware-verified. This is the highest-risk phase so far --
+concurrency bugs are typically much harder to catch than sequential ones,
+even with careful review, since they may only manifest under specific
+timing/contention conditions that don't show up in every run.
+
+**Two genuinely new problems this phase had to solve:**
+
+1. **Distinct starting points.** The walk's next step depends only on the
+   current point, so kangaroos of the same herd starting at an identical
+   point would take an identical path forever -- wasted parallelism, not
+   just inefficiency. Verified in Python first (`multi_kangaroo_sim.py`,
+   checked against the trusted single-pair baseline): kangaroo *i* in a
+   herd starts at the herd's usual base position plus a distinct offset
+   `i*mean_jump`, with its distance counter initialized to include that
+   offset -- this keeps the collision math identical to the single-pair
+   case, just with nonzero starting distances.
+
+2. **Concurrent DP table access.** Thousands of threads can now try to
+   read/write the same hash table at once. The single-thread table used a
+   simple boolean "occupied" flag; naively translating that to atomics
+   would let one thread observe another's "occupied" flag before that
+   thread has finished writing its payload -- a torn read. Fixed with a
+   3-state field (`EMPTY` / `CLAIMED` / `READY`) updated via `atomicCAS`,
+   publishing the payload with a `__threadfence()` before flipping to
+   `READY`. A thread that sees `CLAIMED` just moves to the next probe slot
+   rather than waiting -- this can rarely skip a slot that would have
+   matched a moment later, which costs a little search time, never
+   correctness (every candidate key is still independently verified via
+   `scalar_mult(k)==pubkey`, exactly as in every earlier phase).
+
+**A performance bug caught before shipping**: an early version had every
+thread independently recompute the 32-entry jump table via `scalar_mult`
+-- with thousands of threads, that's thousands of redundant computations
+of the exact same 32 points (the same class of waste the Phase 4c
+single-thread fix addressed, just multiplied by thread count this time).
+Fixed with a separate one-time `build_jump_table_kernel` that computes it
+once into memory every thread then reads.
+
+**New files:**
+- `multi_kangaroo_sim.py` — Python verification of the offset scheme.
+- `kangaroo_walk_parallel.cuh` — the atomic DP table and parallel kernel.
+- `test_kangaroo_parallel.cu` — the test harness.
+
+**Recommended: test in stages, not all at once.** Given how much harder
+concurrency bugs are to catch than sequential ones, start with a small
+kangaroo count to keep things easy to reason about if something looks
+wrong, then scale up once that's confirmed solid:
+
+```bash
+nvcc -O3 -arch=sm_86 -o test_kangaroo_parallel test_kangaroo_parallel.cu
+
+# Stage 1: small kangaroo count first
+./test_kangaroo_parallel 4 4
+
+# Stage 2: the default (128 tame + 128 wild = 256 total)
+./test_kangaroo_parallel
+
+# Stage 3: push further once stages 1-2 are clean
+./test_kangaroo_parallel 1000 1000
+```
+
+**If something looks wrong** (a test fails, or -- more concerning for
+concurrency code -- results are inconsistent across repeated runs of the
+exact same command), that's a genuine signal worth investigating rather
+than re-running until it passes. Send back the exact output, and if your
+CUDA toolkit includes `compute-sanitizer` (`compute-sanitizer --tool
+racecheck ./test_kangaroo_parallel 4 4`), that's worth running too --
+it's specifically built to catch shared-memory/synchronization bugs like
+the ones this phase is most at risk of.
+
+**Expected output on success** (numbers will vary):
+```
+Parallel kangaroo walk self-test (Phase 4d)
+Kangaroos: 128 tame + 128 wild = 256 total
+----------------------------------------------------------------------
+[PASS] test 0: found=1 key_matches=1 total_jumps=XXX time=XXms (XXX aggregate jumps/sec)
+...
+----------------------------------------------------------------------
+All 8 parallel kangaroo test cases PASSED.
+```
+
+The aggregate jumps/sec figure is the number to send back -- comparing it
+to the single-thread ~1000 jumps/sec baseline from Phase 4c tells us the
+real parallel scaling efficiency (not the naive "just multiply by thread
+count" assumption used in the earlier puzzle-timing extrapolation).
+
