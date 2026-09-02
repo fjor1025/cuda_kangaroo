@@ -61,6 +61,15 @@ int check_cuda(cudaError_t err, const char* what) {
 }
 
 int main() {
+    // Use a true blocking wait for cudaDeviceSynchronize() instead of
+    // CUDA's default (cudaDeviceScheduleAuto), which often spin-polls
+    // the CPU at 100% on one core for the entire kernel duration rather
+    // than actually sleeping the host thread. On a rig where the CPU
+    // isn't built for sustained load like that, this can drive CPU temps
+    // up fast -- observed hitting 100C during testing. This flag must be
+    // set before any other CUDA call in the process.
+    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+
     printf("Kangaroo walk self-test (Phase 4c)\n");
     printf("Built on field (4a) and point (4b) arithmetic, both already\n");
     printf("verified on this hardware. This tests NEW code: the walk loop,\n");

@@ -24,6 +24,14 @@ int check_cuda(cudaError_t err, const char* what) {
 }
 
 int main(int argc, char** argv) {
+    // See test_kangaroo_walk.cu for why this matters: CUDA's default
+    // sync policy can spin-poll a CPU core at 100% for the whole kernel
+    // duration instead of sleeping the host thread, which is a real
+    // concern for a rig whose CPU isn't built for sustained load. This
+    // is even more relevant here, since the parallel kernel runs for
+    // longer stretches than the single-thread version.
+    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+
     int num_tame = (argc > 1) ? atoi(argv[1]) : 128;
     int num_wild = (argc > 2) ? atoi(argv[2]) : 128;
     int total_kangaroos = num_tame + num_wild;

@@ -404,3 +404,24 @@ to the single-thread ~1000 jumps/sec baseline from Phase 4c tells us the
 real parallel scaling efficiency (not the naive "just multiply by thread
 count" assumption used in the earlier puzzle-timing extrapolation).
 
+## CPU Hitting 100°C While Running Tests
+
+If you saw CPU temperature spike to 100°C while running these tests
+(observed on the rig during Phase 4d testing) -- this is very likely
+caused by a real, fixable issue in the test harnesses, not a hardware
+problem. CUDA's default synchronization policy (`cudaDeviceScheduleAuto`)
+frequently chooses to **spin-poll** the CPU at 100% on one core for the
+entire kernel duration while waiting in `cudaDeviceSynchronize()`, rather
+than actually sleeping the host thread. On a rig built around GPU work
+rather than sustained CPU load, this can drive temperatures up fast,
+especially across several back-to-back test runs (the `1000 1000` test
+alone ran for a combined ~15 seconds across all 8 cases; add several such
+runs together and that's a lot of continuous single-core spinning).
+
+**Fixed**: both test harnesses now call `cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync)`
+at the start of `main()`, before any other CUDA call, which tells the
+driver to actually sleep the host thread while waiting instead of
+spin-polling. This has **no effect on the timing numbers themselves** --
+those are measured via `cudaEvent`s (GPU-side timing), completely
+independent of how the host waits.
+
